@@ -18,8 +18,16 @@ spec:
     spec:
       nodeSelector:
         role: loadbalancer
+      volumes:
+        - name: ssl-cert
+          secret:
+            secretName: ssl-certs
       containers:
       - image: us.gcr.io/kubetest-1319/kube-haproxy-lb:0.4.2
+        volumeMounts:
+          - name: ssl-cert
+            mountPath: /dev/ssl-cert
+            readOnly: true
         imagePullPolicy: Always
         livenessProbe:
           httpGet:
@@ -55,4 +63,5 @@ spec:
         #   protocol: TCP
         resources: {}
         args:
+        - --ssl-cert=/dev/ssl-cert/
 #        - --tcp-services=mysql:3306,nginxsvc:443
