@@ -19,7 +19,7 @@ spec:
       nodeSelector:
         role: loadbalancer
       containers:
-      - image: gcr.io/google_containers/servicelb:0.4
+      - image: us.gcr.io/kubetest-1319/kube-haproxy-lb:0.4.2
         imagePullPolicy: Always
         livenessProbe:
           httpGet:
@@ -28,6 +28,13 @@ spec:
             scheme: HTTP
           initialDelaySeconds: 30
           timeoutSeconds: 5
+        resources:
+          requests:
+            memory: "64Mi"
+            cpu: "250m"
+          limits:
+            memory: "128Mi"
+            cpu: "500m"
         name: haproxy
         ports:
         # All http services
@@ -39,13 +46,13 @@ spec:
           hostPort: 8080
           protocol: TCP
         # mysql
-        - containerPort: 3306
-          hostPort: 3306
-          protocol: TCP
-        # haproxy stats
-        - containerPort: 1936
-          hostPort: 1936
-          protocol: TCP
+        # - containerPort: 3306
+        #   hostPort: 3306
+        #   protocol: TCP
+        # # haproxy stats
+        # - containerPort: 1936
+        #   hostPort: 1936
+        #   protocol: TCP
         resources: {}
         args:
-        - --tcp-services=mysql:3306,nginxsvc:443
+#        - --tcp-services=mysql:3306,nginxsvc:443

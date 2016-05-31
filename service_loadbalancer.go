@@ -19,17 +19,18 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"sort"
 	"io"
 	"io/ioutil"
 	"net/http"
 	"os"
 	"os/exec"
 	"reflect"
-	"sort"
 	"strconv"
 	"strings"
 	"text/template"
 	"time"
+	"net/url"
 
 	"github.com/golang/glog"
 	flag "github.com/spf13/pflag"
@@ -50,6 +51,8 @@ const (
 	resyncPeriod             = 10 * time.Second
 	lbApiPort                = 8081
 	lbAlgorithmKey           = "serviceloadbalancer/lb.algorithm"
+	lbVirtualHostKey         = "virtualHost"
+	lbVirtualHostPriorityKey = "virtualHostPriority"
 	lbHostKey                = "serviceloadbalancer/lb.host"
 	lbSslTerm                = "serviceloadbalancer/lb.sslTerm"
 	lbAclMatch               = "serviceloadbalancer/lb.aclMatch"
@@ -146,10 +149,97 @@ var (
 // The Ep field can contain the ips of the pods that make up a service, or the
 // clusterIP of the service itself (in which case the list has a single entry,
 // and kubernetes handles loadbalancing across the service endpoints).
+
+type acl struct {
+	Name string
+	Rule string
+}
+
+type aclSet struct {
+	Set []acl
+}
+
+func globToRe(str string) string {
+	return strings.Replace(strings.Replace(str,".","\\.",-1),"*",".*",-1)
+}
+
+func addHostRules(set []acl,u *url.URL) []acl {
+	host := u.Host
+
+	if strings.Contains(host,"*") {
+		hostRe := globToRe(host)
+		rule := fmt.Sprintf("hdr_reg(host) -i ^%s$",hostRe)
+		set=append(set,acl{"",rule})
+	} else {
+		rule := fmt.Sprintf("hdr(host) -i %s",host);
+		set=append(set,acl{"",rule})
+	}
+	return set
+}
+
+func addPathRules(set []acl, u *url.URL) []acl {
+	path := u.Path
+
+	if strings.Contains(path,"*") {
+		pathRe := globToRe(path)
+		rule := fmt.Sprintf("path_reg -i ^%s$",pathRe)
+		set=append(set,acl{"",rule})
+	} else {
+		rule := fmt.Sprintf("path_beg -i %s",path);
+		set=append(set,acl{"",rule})
+	}
+	
+	return set
+}
+
+func nameAll(r *[]aclSet,svcName string) {
+	for i:=0 ; i < len(*r) ; i++ {
+		for j:=0 ; j < len((*r)[i].Set) ; j++ {
+			(*r)[i].Set[j].Name = fmt.Sprintf("acl_%s_%d_%d",svcName,i,j)
+		}
+	}
+}
+
+func calculateAcls(name string,VirtualHost string) []aclSet {
+	var r []aclSet
+	virtualHosts := strings.Split(VirtualHost,",")
+	
+	for _,virtualHost := range virtualHosts {
+		parts,_ := url.Parse(virtualHost)
+
+		var set []acl
+
+		if len(parts.Host)>0 {
+			set = addHostRules(set,parts)
+		}
+		if len(parts.Path)>0 {
+		 	set = addPathRules(set,parts)
+		}
+		
+		r = append(r,aclSet{set})
+	}
+
+	nameAll(&r,name)
+	
+	for _,aclSet := range(r) {
+		for _,acl := range(aclSet.Set) {
+			fmt.Printf("ACL %s %s\n",acl.Name,acl.Rule)
+		}
+	}
+	
+	return r
+}
+
+
 type service struct {
 	Name string
 	Ep   []string
+	
+	Priority int
+	VirtualHost string
 
+	AclSets []aclSet
+	
 	// Kubernetes endpoint port. The application must serve a 200 page on this port.
 	BackendPort int
 
@@ -200,6 +290,18 @@ func (s serviceByName) Less(i, j int) bool {
 	return s[i].Name < s[j].Name
 }
 
+type serviceByPriority []service
+
+func (s serviceByPriority) Len() int {
+	return len(s)
+}
+func (s serviceByPriority) Swap(i, j int) {
+	s[i], s[j] = s[j], s[i]
+}
+func (s serviceByPriority) Less(i, j int) bool {
+	return s[i].Priority > s[j].Priority
+}
+
 // loadBalancerConfig represents loadbalancer specific configuration. Eventually
 // kubernetes will have an api for l7 loadbalancing.
 type loadBalancerConfig struct {
@@ -225,6 +327,26 @@ type serviceAnnotations map[string]string
 
 func (s serviceAnnotations) getAlgorithm() (string, bool) {
 	val, ok := s[lbAlgorithmKey]
+	return val, ok
+}
+
+func (s serviceAnnotations) getVirtualHostPriority() (int,bool) {
+	val,ok := s[lbVirtualHostPriorityKey]
+
+	
+	if ok {
+//		fmt.Printf("OK Virtual host priority:\n",val,ok);
+		ret,err := strconv.Atoi(val)
+//		fmt.Printf("Conv: %d\n",ret,err);
+		return ret, err==nil
+	} else {
+//		fmt.Printf("NOT OK, Zero\n");
+		return 0,true
+	}
+}
+
+func (s serviceAnnotations) getVirtualHost() (string,bool) {
+	val,ok := s[lbVirtualHostKey]
 	return val, ok
 }
 
@@ -327,6 +449,7 @@ func (cfg *loadBalancerConfig) write(services map[string][]service, dryRun bool)
 	err = t.Execute(w, conf)
 	return
 }
+
 
 // reload reloads the loadbalancer using the reload cmd specified in the json manifest.
 func (cfg *loadBalancerConfig) reload() error {
@@ -442,6 +565,15 @@ func (lbc *loadBalancerController) getServices() (httpSvc []service, httpsTermSv
 				BackendPort: getTargetPort(&servicePort),
 			}
 
+			if priority, ok := serviceAnnotations(s.ObjectMeta.Annotations).getVirtualHostPriority(); ok {
+				newSvc.Priority = priority
+			}
+
+			if val, ok := serviceAnnotations(s.ObjectMeta.Annotations).getVirtualHost(); ok {
+				newSvc.VirtualHost = val
+				newSvc.AclSets = calculateAcls(newSvc.Name,val);
+			}
+			
 			if val, ok := serviceAnnotations(s.ObjectMeta.Annotations).getHost(); ok {
 				newSvc.Host = val
 			}
@@ -498,9 +630,9 @@ func (lbc *loadBalancerController) getServices() (httpSvc []service, httpsTermSv
 		}
 	}
 
-	sort.Sort(serviceByName(httpSvc))
-	sort.Sort(serviceByName(httpsTermSvc))
-	sort.Sort(serviceByName(tcpSvc))
+	sort.Sort(serviceByPriority(httpSvc))
+	sort.Sort(serviceByPriority(httpsTermSvc))
+	sort.Sort(serviceByPriority(tcpSvc))
 
 	return
 }
@@ -511,7 +643,9 @@ func (lbc *loadBalancerController) sync(dryRun bool) error {
 		time.Sleep(100 * time.Millisecond)
 		return errDeferredSync
 	}
+
 	httpSvc, httpsTermSvc, tcpSvc := lbc.getServices()
+
 	if len(httpSvc) == 0 && len(httpsTermSvc) == 0 && len(tcpSvc) == 0 {
 		return nil
 	}

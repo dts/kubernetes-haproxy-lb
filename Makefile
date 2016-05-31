@@ -1,14 +1,21 @@
 all: push
 
 # 0.0 shouldn't clobber any released builds
-TAG = 0.4
-PREFIX = gcr.io/google_containers/servicelb
+TAG = 0.4.2
+PREFIX = us.gcr.io/kubetest-1319/kube-haproxy-lb
 HAPROXY_IMAGE = contrib-haproxy
 
-server: service_loadbalancer.go
+builder: .builder
+	docker build -t golang_godep -f Dockerfile.build .
+	touch .builder
+
+build: service_loadbalancer.go
 	CGO_ENABLED=0 GOOS=linux godep go build -a -installsuffix cgo -ldflags '-w' -o service_loadbalancer ./service_loadbalancer.go ./loadbalancer_log.go
 
-container: server
+service_loadbalancer: service_loadbalancer.go
+	docker run --rm --volume $(shell pwd):/go/app golang_godep bash -c 'cd /go/app && make build'
+
+container: service_loadbalancer FORCE
 	docker build -t $(PREFIX):$(TAG) .
 
 push: container
@@ -18,3 +25,6 @@ clean:
 	# remove servicelb and contrib-haproxy images
 	docker rmi -f $(HAPROXY_IMAGE):$(TAG) || true
 	docker rmi -f $(PREFIX):$(TAG) || true
+	rm .builder
+
+FORCE:
