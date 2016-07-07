@@ -1,0 +1,4 @@
+FROM datadog/docker-dd-agent:latest
+
+RUN rm /etc/dd-agent/conf.d/docker_daemon.yaml
+ADD dd.haproxy.yaml /etc/dd-agent/conf.d/haproxy.yaml

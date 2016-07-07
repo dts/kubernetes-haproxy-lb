@@ -27,4 +27,9 @@ clean:
 	docker rmi -f $(PREFIX):$(TAG) || true
 	rm .builder
 
+datadog:
+	docker build -t us.gcr.io/kubetest-1319/haproxy-datadog:latest -f Dockerfile-datadog .
+	gcloud docker push us.gcr.io/kubetest-1319/haproxy-datadog:latest
+
+
 FORCE:

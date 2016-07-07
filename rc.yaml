@@ -23,7 +23,20 @@ spec:
           secret:
             secretName: ssl-certs
       containers:
+      - image: us.gcr.io/kubetest-1319/haproxy-datadog:latest
+        name: haproxy-datadog-agent
+        resources:
+          requests:
+            memory: "64Mi"
+            cpu: "50m"
+        env:
+          - name: API_KEY
+            value: 4cbb060c96c301a30710fcf88e418dbf
       - image: us.gcr.io/kubetest-1319/kube-haproxy-lb:0.4.2
+        resources:
+          requests:
+            memory: "64Mi"
+            cpu: "50m"
         volumeMounts:
           - name: ssl-cert
             mountPath: /dev/ssl-cert
