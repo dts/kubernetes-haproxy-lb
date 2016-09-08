@@ -1,8 +1,8 @@
 all: push
 
 # 0.0 shouldn't clobber any released builds
-TAG = 0.4.2
-PREFIX = us.gcr.io/kubetest-1319/kube-haproxy-lb
+TAG = 0.4.4
+PREFIX = thehumaneffort/kube-haproxy-lb
 HAPROXY_IMAGE = contrib-haproxy
 
 builder: .builder
@@ -10,7 +10,7 @@ builder: .builder
 	touch .builder
 
 build: service_loadbalancer.go
-	CGO_ENABLED=0 GOOS=linux godep go build -a -installsuffix cgo -ldflags '-w' -o service_loadbalancer ./service_loadbalancer.go ./loadbalancer_log.go
+	CGO_ENABLED=0 GOOS=linux godep go build -v -a -installsuffix cgo -ldflags '-w' -o service_loadbalancer ./service_loadbalancer.go ./loadbalancer_log.go
 
 service_loadbalancer: service_loadbalancer.go
 	docker run --rm --volume $(shell pwd):/go/app golang_godep bash -c 'cd /go/app && make build'

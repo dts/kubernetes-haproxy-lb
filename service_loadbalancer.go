@@ -130,6 +130,8 @@ var (
 	startSyslog = flags.Bool("syslog", false, `if set, it will start a syslog server
                 that will forward haproxy logs to stdout.`)
 
+	externalSyslogServer = flags.String("external-syslog-server", "", `if set, it will use an external syslog server`)
+
 	sslCert   = flags.String("ssl-cert", "", `if set, it will load the certificate.`)
 	sslCaCert = flags.String("ssl-ca-cert", "", `if set, it will load the certificate from which
 		to load CA certificates used to verify client's certificate.`)
@@ -221,11 +223,11 @@ func calculateAcls(name string,VirtualHost string) []aclSet {
 
 	nameAll(&r,name)
 	
-	for _,aclSet := range(r) {
-		for _,acl := range(aclSet.Set) {
-			fmt.Printf("ACL %s %s\n",acl.Name,acl.Rule)
-		}
-	}
+// 	for _,aclSet := range(r) {
+// 		for _,acl := range(aclSet.Set) {
+//			fmt.Printf("ACL %s %s\n",acl.Name,acl.Rule)
+// 		}
+// 	}
 	
 	return r
 }
@@ -429,6 +431,8 @@ func (cfg *loadBalancerConfig) write(services map[string][]service, dryRun bool)
 
 	conf := make(map[string]interface{})
 	conf["startSyslog"] = strconv.FormatBool(cfg.startSyslog)
+	conf["syslogServer"] = externalSyslogServer
+	
 	conf["services"] = services
 
 	var sslConfig string
@@ -691,11 +695,19 @@ func newLoadBalancerController(cfg *loadBalancerConfig, kubeClient *unversioned.
 	}
 
 	enqueue := func(obj interface{}) {
+		
 		key, err := keyFunc(obj)
 		if err != nil {
 			glog.Infof("Couldn't get key for object %+v: %v", obj, err)
 			return
 		}
+		if key == "default/kubernetes" {
+			return
+		}
+		if strings.HasPrefix(key,"kube-system/") {
+			return
+		}
+		
 		lbc.queue.Add(key)
 	}
 	eventHandlers := framework.ResourceEventHandlerFuncs{

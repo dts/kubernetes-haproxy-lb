@@ -1,19 +1,16 @@
-apiVersion: v1
-kind: ReplicationController
+apiVersion: extensions/v1beta1
+kind: Deployment
 metadata:
-  name: service-loadbalancer
+  name: loadbalancer
   labels:
-    app: service-loadbalancer
+    app: loadbalancer
     version: v1
 spec:
   replicas: 2
-  selector:
-    app: service-loadbalancer
-    version: v1
   template:
     metadata:
       labels:
-        app: service-loadbalancer
+        app: loadbalancer
         version: v1
     spec:
       volumes:
@@ -56,8 +53,7 @@ apiVersion: v1
 kind: Service
 metadata:
   labels:
-    app: service-loadbalancer
-    k8s-app: service-loadbalancer
+    app: loadbalancer
     version: v1
   name: loadbalancer
 spec:
@@ -71,6 +67,6 @@ spec:
     protocol: TCP
     targetPort: 80
   selector:
-    app: service-loadbalancer
+    app: loadbalancer
     version: v1
   type: LoadBalancer
